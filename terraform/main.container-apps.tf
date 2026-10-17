@@ -207,7 +207,7 @@ resource "azurerm_container_app_custom_domain" "this" {
 
   name                     = var.custom_domain_name
   container_app_id         = azurerm_container_app.this.id
-  certificate_binding_type = "Disabled"
+  certificate_binding_type = "SniEnabled"
 
   # container_app_environment_certificate_id is deliberately unset. That field
   # accepts a bring-your-own azurerm_container_app_environment_certificate

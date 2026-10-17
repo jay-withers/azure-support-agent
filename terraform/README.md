@@ -11,9 +11,9 @@ on lives in `jay-withers/azure-container-apps` and is looked up by name
 In this project's resource group (`rg-supportagent-<env>`, in the shared
 environment's region):
 
-- the container app, created on Microsoft's quickstart placeholder image (see
-  [Deploying images](#deploying-images)), 1 vCPU / 2 GiB, scale to zero, max one
-  replica
+- the container app: upstream's image at the digest in `environments/<env>.tfvars`
+  (see [Deploying images](#deploying-images)), 1 vCPU / 2 GiB, scale to zero,
+  max one replica
 - a user-assigned identity, used only to resolve its Key Vault secrets
 - a Key Vault holding `DATABASE-URL` and `SEED-ADMIN-PASSWORD`
 - a PostgreSQL Flexible Server (B1ms, password auth) and its `azsup` database,
@@ -49,30 +49,26 @@ with the account key only.
    provider and wait until they resolve.
 4. Restore `custom_domain_name`, run `make apply` to issue the certificate, then
    `make bind-domain`.
-5. `make deploy IMAGE_DIGEST=$(make -s digest)`. This replaces the quickstart
-   placeholder with the real app and moves the ingress to 8000. It also pushes
-   the custom domain's `PUBLIC_BASE_URL`, since env sits under `ignore_changes`.
-6. `make url`, then sign in as `admin` with `make admin-password`. The app forces
+5. `make url`, then sign in as `admin` with `make admin-password`. The app forces
    a password change.
-7. In the app, configure an AI provider and an Azure connection (a service
+6. In the app, configure an AI provider and an Azure connection (a service
    principal) under **Settings**. Terraform grants the app no Azure RBAC.
 
 ## Deploying images
 
-Terraform never deploys the real app. It creates the container app running
-`mcr.microsoft.com/k8se/quickstart:latest` with the ingress on port 80, and
-from then on it ignores the container's image and env and the ingress port.
-`make deploy IMAGE_DIGEST=sha256:...` replaces the placeholder: it moves the
-ingress to 8000, then rolls out upstream's image with `az containerapp update`.
-A fresh apply therefore shows Microsoft's quickstart page until the first
-deploy, and a plan can show no change even when the running image has moved.
+The running version is controlled from this repository. `image_digest` in
+`environments/<env>.tfvars` pins upstream's image, and Terraform owns it along
+with the app's env, port and probes. There's no `ignore_changes`, so a plan
+always shows what is actually deployed.
 
 Upstream publishes only moving tags (`latest`, `v1`), so builds are named by
-digest. `make digest` prints the one `v1` currently points at.
+digest. To upgrade:
 
-The app has no explicit probes. Upstream's `/healthz` and `/readyz` don't exist
-in the placeholder, so HTTP probes would fail the first revision. Container
-Apps' default TCP probes on the ingress port work for both images.
+1. Renovate opens a PR bumping `image_digest` when upstream's `v1` tag moves.
+   To bump by hand instead, `make digest` prints the current one.
+2. Merge it, then run `make apply`.
+
+Rolling back is the same thing with an older digest.
 
 ## Cost
 
@@ -131,6 +127,7 @@ auto-pause tier. The app bills only while a replica is running.
 | <a name="input_allowed_client_ip_ranges"></a> [allowed\_client\_ip\_ranges](#input\_allowed\_client\_ip\_ranges) | Client IP ranges (CIDR) allowed to reach the app, enforced at the Container Apps ingress before any request reaches the container. Empty allows the whole internet, leaving the app's own sign-in and in-app allowlist in front of it. An Allow list that omits your own address makes the app unreachable from your browser, not from Azure: `az containerapp ingress access-restriction remove` recovers. | <pre>list(object({<br/>    name             = string<br/>    ip_address_range = string<br/>    description      = optional(string, "")<br/>  }))</pre> | `[]` | no |
 | <a name="input_custom_domain_name"></a> [custom\_domain\_name](#input\_custom\_domain\_name) | Hostname to bind to the app with a free Azure-managed certificate, e.g. `support.jaywithers.uk`. Empty creates neither the certificate nor the binding; the default `*.azurecontainerapps.io` URL always works either way. The CNAME (to that default FQDN) and the `asuid.<label>` TXT record (holding `custom_domain_verification_id`) must already resolve before apply, because Azure validates both during issuance — `make dns` prints them. | `string` | `""` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Deployment environment. Drives resource naming, and selects which shared platform environment this project deploys onto. | `string` | n/a | yes |
+| <a name="input_image_digest"></a> [image\_digest](#input\_image\_digest) | Digest of upstream's `docker.io/zmustafa/azure-support-agent` image to run. Upstream publishes only moving tags (`latest`, `v1`), so the version is pinned by digest. Renovate opens a PR bumping this when upstream's `v1` moves; merging it and running `make apply` is the deploy. | `string` | n/a | yes |
 | <a name="input_key_vault_administrator_object_ids"></a> [key\_vault\_administrator\_object\_ids](#input\_key\_vault\_administrator\_object\_ids) | Extra Entra object IDs granted Key Vault Secrets Officer, so they can read the seeded admin password. Whoever runs `terraform apply` is always included, so this is only for a second person or a second machine. | `list(string)` | `[]` | no |
 | <a name="input_platform_environment_name"></a> [platform\_environment\_name](#input\_platform\_environment\_name) | Name of the shared Container Apps environment this app runs on. | `string` | `"cae-platform-dev"` | no |
 | <a name="input_platform_resource_group_name"></a> [platform\_resource\_group\_name](#input\_platform\_resource\_group\_name) | Resource group holding the shared Container Apps environment. | `string` | `"rg-platform-dev"` | no |
@@ -148,7 +145,7 @@ auto-pause tier. The app bills only while a replica is running.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_app_url"></a> [app\_url](#output\_app\_url) | The application's stable default HTTPS URL. With a custom domain set, sign in through custom\_domain\_url instead: the app's CSRF origin check accepts only one origin. |
-| <a name="output_container_app_name"></a> [container\_app\_name](#output\_container\_app\_name) | Name of the container app, which `make deploy` passes to `az containerapp update`. |
+| <a name="output_container_app_name"></a> [container\_app\_name](#output\_container\_app\_name) | Name of the container app, for `make logs` and `make restart`. |
 | <a name="output_custom_domain_url"></a> [custom\_domain\_url](#output\_custom\_domain\_url) | The bound custom domain, if var.custom\_domain\_name is set. Empty otherwise. |
 | <a name="output_custom_domain_verification_id"></a> [custom\_domain\_verification\_id](#output\_custom\_domain\_verification\_id) | Domain verification ID, published as the `asuid.<label>` TXT record before apply. |
 | <a name="output_key_vault_name"></a> [key\_vault\_name](#output\_key\_vault\_name) | Key Vault name, for reading SEED-ADMIN-PASSWORD — see `make admin-password`. |

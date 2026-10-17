@@ -23,6 +23,16 @@
         "plugin \"azurerm\" \\{[^}]*version\\s*=\\s*\"(?<currentValue>[^\"]+)\"[^}]*source\\s*=\\s*\"github\\.com/(?<depName>[^\"]+)\""
       ],
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "Upstream image digest pinned in tfvars. Upstream publishes only moving tags, so the digest behind the named tag is what is tracked.",
+      "fileMatch": [
+        "(^|/)terraform/environments/[^/]+\\.tfvars$"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) tag=(?<currentValue>\\S+)\\s+image_digest\\s*=\\s*\"(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "autoReplaceStringTemplate": "# renovate: datasource={{{datasource}}} depName={{{depName}}} tag={{{currentValue}}}\nimage_digest = \"{{{newDigest}}}\""
     }
   ]
 }

@@ -43,6 +43,12 @@ variable "platform_environment_name" {
   default     = "cae-platform-dev"
 }
 
+variable "platform_workload_profile_name" {
+  description = "Workload profile on the shared environment the app runs on. The platform is a workload-profiles environment, so Azure assigns every app a profile whether or not one is named; leaving this unset makes every plan try to clear the `Consumption` Azure filled in."
+  type        = string
+  default     = "Consumption"
+}
+
 # --- the database -------------------------------------------------------------
 
 variable "postgres_location" {

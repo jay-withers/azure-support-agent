@@ -11,6 +11,11 @@ resource "azurerm_container_app" "this" {
 
   # No `location` argument: a container app inherits its environment's region.
 
+  # Stated rather than left unset: on a workload-profiles environment Azure
+  # assigns the app a profile regardless, and an unset argument then shows as
+  # `"Consumption" -> null` drift on every plan.
+  workload_profile_name = var.platform_workload_profile_name
+
   # Single, not Multiple. Background work is coordinated through database
   # leases, and two revisions answering at once would mean two schedulers.
   revision_mode = "Single"

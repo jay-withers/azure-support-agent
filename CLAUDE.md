@@ -9,10 +9,11 @@ Runs a self-hosted copy of
 the shared Azure Container Apps environment owned by
 `jay-withers/azure-container-apps`. There is no application code here: the
 container runs upstream's Docker Hub image
-(`docker.io/zmustafa/azure-support-agent`), **deployed by digest** with
-`make deploy` because upstream publishes only moving tags (`latest`, `v1`). The repo is a Terraform root config
-modelled on `jay-withers/finances` (same shared-platform lookup, deploy flow,
-custom-domain workaround), plus the template's dev container, pre-commit hooks,
+(`docker.io/zmustafa/azure-support-agent`), **pinned by digest** in
+`environments/<env>.tfvars` because upstream publishes only moving tags
+(`latest`, `v1`). The repo is a Terraform root config
+modelled on `jay-withers/finances` (same shared-platform lookup and
+custom-domain workaround, but Terraform owns the image), plus the template's dev container, pre-commit hooks,
 CI and Renovate.
 
 ## Dev container
@@ -62,18 +63,16 @@ Key design points, each explained in comments at the relevant resource:
   certificate does), and its account key is in state (no write-only variant).
 - **Scale to zero** (min 0, max 1, 1 vCPU / 2 GiB). The app's in-process
   schedulers don't run while it's scaled down; that's an accepted trade-off.
-- **Terraform never deploys the real image.** It creates the app on Microsoft's
-  placeholder `mcr.microsoft.com/k8se/quickstart:latest` with the ingress on
-  port 80 (the placeholder's port), and `ignore_changes` covers the container's
-  image and env plus `ingress[0].target_port`. `make deploy IMAGE_DIGEST=...`
-  (az CLI) moves the ingress to 8000 first, then swaps in upstream's image and
-  pushes `PUBLIC_BASE_URL`/`FRONTEND_ORIGIN`. So after a fresh apply the app
-  serves the placeholder until the first `make deploy`. No `command`/`args` are
-  set, so the image's CMD stays the only source of truth.
-- **No explicit probes.** Upstream's `/healthz`/`/readyz` on 8000 would fail
-  the placeholder's first revision, and Terraform can't set anything on create
-  only. Container Apps' default TCP probes on the current ingress port suit both
-  images. Don't add HTTP probes back without solving that.
+- **This repo controls the image version.** `var.image_digest` (in
+  `environments/<env>.tfvars`) pins upstream's image, and Renovate bumps it via
+  the `# renovate:` comment and a regex manager in `renovate.json`. Merge, then
+  `make apply`, is the deploy. Unlike finances there is **no `ignore_changes`**
+  and no az-cli deploy step: Terraform owns image, env, ingress port and probes,
+  so a plan is always the truth. No `command`/`args` are set, so the image's
+  CMD stays the only source of truth for what runs.
+- **Probes:** startup and liveness on `/healthz`, readiness on `/readyz`, all on
+  8000. The startup probe (10 × 10s) carries the cold start, which runs
+  `alembic upgrade head` before uvicorn.
 - **Custom domain** (`support.jaywithers.uk`): same CNAME/asuid flow and
   `make bind-domain` workaround as finances (azurerm#25788, #27362).
 - `prevent_destroy` is set on the PostgreSQL server/database and the storage
@@ -97,7 +96,8 @@ The canonical copy of that script lives in the template repo; `terraform-root-ak
 one diverge.
 
 `terraform/environments/dev.tfvars` is committed intentionally. Don't put
-secrets in it (`gitleaks` scans as a backstop).
+secrets in it (`gitleaks` scans as a backstop). It holds `image_digest`, the
+app version.
 
 ## Commands
 
@@ -109,8 +109,7 @@ make lint              # run all pre-commit hooks against every file
 make fmt               # terraform fmt -recursive
 make validate          # terraform init -backend=false + validate (no Azure auth)
 make plan / apply      # init against backends/$(ENV).hcl + plan/apply (ENV default dev)
-make digest            # digest upstream's v1 tag points at (TAG=... to override)
-make deploy IMAGE_DIGEST=sha256:...   # az containerapp update to that digest
+make digest            # digest upstream's v1 tag points at, to compare with image_digest
 make restart           # restart the revision (re-resolves Key Vault secrets)
 make url / logs / admin-password / dns / bind-domain
 ```

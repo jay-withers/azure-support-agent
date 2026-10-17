@@ -1,18 +1,11 @@
 locals {
-  # **Terraform never deploys the real app.** It creates the container app
-  # running Microsoft's Container Apps quickstart image, and `make deploy` (az
-  # cli) replaces it with upstream's image, pinned by digest, from then on.
-  # Image and ingress port both sit under ignore_changes, so the placeholder is
-  # only ever seen on a brand-new app.
-  #
-  # A moving tag is fine here and only here: it is pulled once, on create, and
-  # never compared against again.
-  bootstrap_image = "mcr.microsoft.com/k8se/quickstart:latest"
+  # By digest, because upstream publishes only moving tags — see
+  # var.image_digest. This repository is the source of truth for the running
+  # version: nothing outside Terraform changes it.
+  image = "docker.io/zmustafa/azure-support-agent@${var.image_digest}"
 
-  # The quickstart image listens on 80. Upstream's uvicorn binds 8000, and
-  # `make deploy` moves the ingress there along with the image — so 8000 is in
-  # the Makefile, not here.
-  bootstrap_target_port = 80
+  # uvicorn binds this, the Dockerfile EXPOSEs it, and every probe checks it.
+  target_port = 8000
 
   # Upstream's own sizing, and not one to shave like finances' 0.25 vCPU: one
   # request can spawn the az CLI and two MCP server subprocesses (Node and

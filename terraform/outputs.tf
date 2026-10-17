@@ -11,7 +11,7 @@ output "app_url" {
 }
 
 output "container_app_name" {
-  description = "Name of the container app, which `make deploy` passes to `az containerapp update`."
+  description = "Name of the container app, for `make logs` and `make restart`."
   value       = azurerm_container_app.this.name
 }
 

@@ -46,9 +46,8 @@ resource "azurerm_container_app" "this" {
     # password change on first login, optional OIDC/SAML) is what stands in
     # front of it, plus var.allowed_client_ip_ranges if set.
     external_enabled = true
-    # Seed value only — see local.bootstrap_target_port and ignore_changes.
-    target_port = local.bootstrap_target_port
-    transport   = "auto"
+    target_port      = local.target_port
+    transport        = "auto"
 
     dynamic "ip_security_restriction" {
       for_each = var.allowed_client_ip_ranges
@@ -83,7 +82,7 @@ resource "azurerm_container_app" "this" {
 
     container {
       name   = "azsupagent"
-      image  = local.bootstrap_image
+      image  = local.image
       cpu    = local.container_cpu
       memory = local.container_memory
 
@@ -116,13 +115,41 @@ resource "azurerm_container_app" "this" {
         path = "/app/.data"
       }
 
-      # **No explicit probes, deliberately.** Upstream's /healthz and /readyz on
-      # 8000 don't exist in the quickstart image this app is created with, so
-      # HTTP probes would fail the very first revision — and Terraform has no way
-      # to set something on create only. With none declared, Container Apps
-      # applies its default TCP probes on whatever the ingress port currently
-      # is, which suits both images. The default startup probe allows ~240s,
-      # enough for a cold start that runs `alembic upgrade head` first.
+      # The startup probe carries the cold start — migrations included — so the
+      # liveness probe never has to tolerate it: up to 10 × 10s before the
+      # platform gives up on a new replica.
+      startup_probe {
+        transport               = "HTTP"
+        port                    = local.target_port
+        path                    = "/healthz"
+        initial_delay           = 5
+        interval_seconds        = 10
+        timeout                 = 3
+        failure_count_threshold = 10
+      }
+
+      # **The probes are different on purpose.** Liveness decides whether to
+      # restart the container, so it must not depend on the database — a
+      # database blip would otherwise turn into a restart loop. /healthz answers
+      # from memory; /readyz is the one that checks dependencies.
+      liveness_probe {
+        transport               = "HTTP"
+        port                    = local.target_port
+        path                    = "/healthz"
+        interval_seconds        = 30
+        timeout                 = 3
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        transport               = "HTTP"
+        port                    = local.target_port
+        path                    = "/readyz"
+        interval_seconds        = 10
+        timeout                 = 3
+        failure_count_threshold = 3
+        success_count_threshold = 1
+      }
     }
 
     volume {
@@ -134,24 +161,12 @@ resource "azurerm_container_app" "this" {
 
   tags = local.tags
 
-  # `make deploy` (az cli) owns the running image, env and ingress port after
-  # the app is created: it swaps the quickstart placeholder for upstream's image
-  # and moves the ingress from 80 to 8000. Ignoring them is what stops the next
-  # apply from rolling the app back to the placeholder.
-  #
-  # The whole `env` list is ignored rather than individual entries, because
-  # indexing into a map-driven `dynamic` block by position would silently shift
-  # if common_env gained or lost a key. The trade-off: a change to any value in
-  # common_env (a new custom domain changes PUBLIC_BASE_URL, for one) needs a
-  # `make deploy` to land on a running revision — `terraform plan` will report
-  # no diff even though the value it computes has moved.
-  lifecycle {
-    ignore_changes = [
-      template[0].container[0].image,
-      template[0].container[0].env,
-      ingress[0].target_port,
-    ]
-  }
+  # **No ignore_changes, unlike finances.** Terraform owns the image as well as
+  # everything else: the version is var.image_digest in environments/<env>.tfvars,
+  # bumped by Renovate, and `make apply` is the deploy. Nothing changes the
+  # running app outside Terraform, so a plan is always the truth about what is
+  # deployed — including env, so a new custom domain's PUBLIC_BASE_URL lands
+  # with the same apply that binds it.
 
   # A secret reference that cannot be resolved fails the revision at start-up,
   # not the apply — so the identity's read access has to exist first.
@@ -192,7 +207,7 @@ resource "azurerm_container_app_custom_domain" "this" {
 
   name                     = var.custom_domain_name
   container_app_id         = azurerm_container_app.this.id
-  certificate_binding_type = "Disabled"
+  certificate_binding_type = "SniEnabled"
 
   # container_app_environment_certificate_id is deliberately unset. That field
   # accepts a bring-your-own azurerm_container_app_environment_certificate

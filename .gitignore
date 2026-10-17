@@ -9,10 +9,10 @@
 crash.log
 crash.*.log
 
-# *.tfvars files are committed intentionally (dev/stg/prd environment inputs —
-# see terraform/examples/basic/*.tfvars). Do not put secrets in them; use Azure
-# Key Vault, GitHub Actions secrets, or ARM_* environment variables instead.
-# gitleaks (pre-commit and CI) scans every commit as a backstop.
+# *.tfvars files are committed intentionally (terraform/environments/<env>.tfvars).
+# Do not put secrets in them; use Azure Key Vault, GitHub Actions secrets, or
+# ARM_* environment variables instead. gitleaks (pre-commit and CI) scans every
+# commit as a backstop.
 
 # CLI configuration and override files
 .terraformrc
@@ -21,10 +21,6 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-
-# Provider lock file — not committed for a reusable module (consumers generate
-# their own); commit it instead if you repurpose this repo as a root config.
-.terraform.lock.hcl
 
 # Saved plan output
 *.tfplan
